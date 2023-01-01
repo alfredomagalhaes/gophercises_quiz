@@ -6,10 +6,10 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"strings"
+	"time"
 )
 
 /*
@@ -19,13 +19,13 @@ todo - keep track of users points
 todo - show the score to the user
 */
 
-type Problem struct {
-	Question string
-	Answer   string
+type problem struct {
+	question string
+	answer   string
 }
 
-func readCsvFile(file string) []Problem {
-	var questions []Problem
+func readCsvFile(file string) []problem {
+	var questions []problem
 
 	fileContent, err := os.ReadFile(file)
 	if err != nil {
@@ -33,23 +33,14 @@ func readCsvFile(file string) []Problem {
 	}
 
 	csvReader := csv.NewReader(bytes.NewReader(fileContent))
-	for {
-		var question Problem
-		record, err := csvReader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			log.Fatal("error reading csv file", err)
-		}
-		if len(record) < 2 {
-			log.Fatal("csv format is not correct, need to have 2 columns")
-		}
+	records, _ := csvReader.ReadAll()
+	questions = make([]problem, len(records))
+	for idx, row := range records {
 
-		question.Question = record[0]
-		question.Answer = record[1]
-
-		questions = append(questions, question)
+		questions[idx] = problem{
+			question: row[0],
+			answer:   row[1],
+		}
 
 	}
 
@@ -58,31 +49,41 @@ func readCsvFile(file string) []Problem {
 
 func main() {
 
-	var defaultCsvFile string = "problems.csv"
-	var userCsv string
 	var csvToRead string
 	var totalPoints int
 	var userScore int
+	var quizTimeOut int
 
-	csvToRead = defaultCsvFile
-	flag.StringVar(&userCsv, "csvFile", "", "use it to pass your own problems csv file")
+	flag.StringVar(&csvToRead, "csvFile", "problems.csv", "use it to pass your own problems csv file")
+	flag.IntVar(&quizTimeOut, "timer", 30, "use it to change the quiz time out timer, informed in seconds")
 	flag.Parse()
-
-	if userCsv != "" {
-		csvToRead = userCsv
-	}
 
 	questions := readCsvFile(csvToRead)
 	totalPoints = len(questions)
 
+	timer := time.NewTimer(time.Duration(quizTimeOut) * time.Second)
+
+problemLoop:
 	for _, question := range questions {
-		fmt.Printf("answer the question, %s: ", question.Question)
-		reader := bufio.NewReader(os.Stdin)
-		// ReadString will block until the delimiter is entered
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(strings.Replace(input, "\n", "", -1))
-		if input == question.Answer {
-			userScore++
+		fmt.Printf("answer the question, %s: ", question.question)
+		answerCh := make(chan string)
+		go func() {
+			reader := bufio.NewReader(os.Stdin)
+			// ReadString will block until the delimiter is entered
+			input, _ := reader.ReadString('\n')
+			input = strings.TrimSpace(strings.Replace(input, "\n", "", -1))
+			answerCh <- input
+		}()
+
+		select {
+		case resp := <-answerCh:
+			if resp == question.answer {
+				userScore++
+			}
+		case <-timer.C:
+			fmt.Println("")
+			fmt.Println("times up...")
+			break problemLoop
 		}
 	}
 
